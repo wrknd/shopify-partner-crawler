@@ -20,7 +20,7 @@ ascii_art = """
 ░▒▓██████▓▒░ ░▒▓███████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░ ░▒▓█▓▒░          ░▒▓███████▓▒░░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░ 
 ░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░ ░▒▓█▓▒░          ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░ 
 ░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░ ░▒▓█▓▒░          ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░░▒▓█▓▒░ 
-░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░░▒▓██████▓▒░░▒▓█▓▒░░▒▓█▓▒░ ░▒▓█▓▒░          ░▒▓█▓▒░░▒▓█▓▒░░▒▓██████▓▒░ ░▒▓█████████████▓▒░  
+░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░░▒▓██████▓▒░░▒▓█▓▒░░▒▓█▓▒░ ░▒▓█▓▒░          ░▒▓█▓▒░░▒▓█▓▒░░▒▓██████▓▒░ ░▒▓█████████████▓░  
 \033[0m
 """
 
@@ -34,7 +34,7 @@ logging.basicConfig(filename='shopify_scraper.log', level=logging.INFO,
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 filename = f"shopify_partners_{timestamp}.csv"
 
-base_url = "https://www.shopify.com/partners/directory/services?partnerTypes=plus&languageCodes=lang-en&sort=AVERAGE_RATING&page={}&_data=pages%2Fshopify.com%2F%28%24locale%29%2Fpartners%2Fdirectory%2Fservices"
+base_url = "https://www.shopify.com/partners/directory/services?sort=AVERAGE_RATING&page={}&_data=pages%2Fshopify.com%2F%28%24locale%29%2Fpartners%2Fdirectory%2Fservices"
 detail_url = "https://www.shopify.com/partners/directory/partner/{}?_data=pages%2Fshopify.com%2F%28%24locale%29%2Fpartners%2Fdirectory%2Fpartner%2F%24partner"
 
 headers = {
@@ -57,12 +57,44 @@ def signal_handler(signum, frame):
 # Set up the signal handler
 signal.signal(signal.SIGINT, signal_handler)
 
+def process_profile(profile):
+    business_name = profile.get('businessName', '')
+    location = profile.get('location', '')
+    languages = ', '.join(profile.get('languages', []))
+    handle = profile.get('handle', '')
+    description = profile.get('description', '')
+    services = ', '.join([service['service']['label'] for service in profile.get('serviceOfferings', [])])
+    industries = ', '.join(profile.get('industries', []))
+    review_count = profile.get('ratings', {}).get('total', '')
+    rating = profile.get('ratings', {}).get('avg', '')
+    website_url = profile.get('websiteUrl', '')
+    avatar_url = profile.get('image', '')
+    contact_email = profile.get('contactEmail', '')
+    contact_phone_number = profile.get('contactPhoneNumber', '')
+    city = location.split(',')[0].strip() if location else ''
+    country = location.split(',')[-1].strip() if location else ''
+    secondary_countries = ', '.join(profile.get('secondaryCountries', []))
+    partner_since = profile.get('createdAt', '')
+    social_media_links = ', '.join(profile.get('socialMediaLinks', []))
+    specialized_services = ', '.join(profile.get('specializedServices', []))
+    other_services = ', '.join(profile.get('otherServices', []))
+    
+    # Add Partner Status
+    partner_status = 'PLUS' if 'PLUS' in profile.get('tags', []) else ''
+
+    return [
+        business_name, location, languages, handle, description, services, industries,
+        review_count, rating, website_url, avatar_url, contact_email, contact_phone_number,
+        city, country, secondary_countries, partner_since, social_media_links,
+        specialized_services, other_services, partner_status
+    ]
+
 try:
     with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
         fieldnames = ['businessName', 'location', 'languages', 'handle', 'description', 'services', 'industries', 
                       'reviewCount', 'rating', 'websiteUrl', 'avatarUrl', 'contactEmail', 'contactPhoneNumber', 
                       'city', 'country', 'secondaryCountries', 'partnerSince', 'socialMediaLinks',
-                      'specializedServices', 'otherServices']
+                      'specializedServices', 'otherServices', 'partnerStatus']  # Add 'partnerStatus' here
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
 
@@ -109,7 +141,8 @@ try:
                     'partnerSince': '',
                     'socialMediaLinks': '',
                     'specializedServices': '',
-                    'otherServices': ''
+                    'otherServices': '',
+                    'partnerStatus': 'PLUS' if 'PLUS' in profile.get('tags', []) else ''  # Add this line
                 }
 
                 detail_response = requests.get(detail_url.format(row['handle']), headers=headers)
