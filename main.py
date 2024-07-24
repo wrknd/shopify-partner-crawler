@@ -94,12 +94,12 @@ try:
         fieldnames = ['businessName', 'location', 'languages', 'handle', 'description', 'services', 'industries', 
                       'reviewCount', 'rating', 'websiteUrl', 'avatarUrl', 'contactEmail', 'contactPhoneNumber', 
                       'city', 'country', 'secondaryCountries', 'partnerSince', 'socialMediaLinks',
-                      'specializedServices', 'otherServices', 'partnerStatus']  # Add 'partnerStatus' here
+                      'specializedServices', 'otherServices', 'partnerStatus']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
 
         page = 1
-        pbar = tqdm(desc="Scraping profiles", unit="profile")
+        pbar = tqdm(desc="Scraping profiles", unit="profile", ncols=100)
 
         while not interrupted:
             response = requests.get(base_url.format(page), headers=headers)
@@ -121,8 +121,11 @@ try:
                 if interrupted:
                     break
 
+                business_name = profile.get('businessName', 'Unknown')
+                pbar.set_description(f"Processing: {business_name[:30]}...")  # Truncate long names
+
                 row = {
-                    'businessName': profile.get('businessName', ''),
+                    'businessName': business_name,
                     'location': profile.get('location', ''),
                     'languages': ', '.join(profile.get('languages', [])),
                     'handle': profile.get('handle', ''),
@@ -142,7 +145,7 @@ try:
                     'socialMediaLinks': '',
                     'specializedServices': '',
                     'otherServices': '',
-                    'partnerStatus': 'PLUS' if 'PLUS' in profile.get('tags', []) else ''  # Add this line
+                    'partnerStatus': 'PLUS' if 'PLUS' in profile.get('tags', []) else ''
                 }
 
                 detail_response = requests.get(detail_url.format(row['handle']), headers=headers)
