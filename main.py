@@ -7,6 +7,9 @@ import time
 from tqdm import tqdm
 from colorama import init, Fore, Back, Style
 import signal
+from requests.exceptions import RequestException
+import random
+import argparse
 
 # Initialize colorama
 init()
@@ -89,6 +92,25 @@ def process_profile(profile):
         specialized_services, other_services, partner_status
     ]
 
+def make_request_with_retry(url, headers, max_retries=5, initial_delay=1, max_delay=60):
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            return response
+        except RequestException as e:
+            if attempt == max_retries - 1:
+                raise e
+            
+            delay = min(initial_delay * (2 ** attempt) + random.uniform(0, 1), max_delay)
+            print(f"\n{Fore.YELLOW}Connection error. Retrying in {delay:.2f} seconds...{Style.RESET_ALL}")
+            time.sleep(delay)
+
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description='Shopify Partners Scraper')
+parser.add_argument('--start-page', type=int, default=1, help='Start scraping from this page')
+args = parser.parse_args()
+
 try:
     with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
         fieldnames = ['businessName', 'location', 'languages', 'handle', 'description', 'services', 'industries', 
@@ -98,16 +120,12 @@ try:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
 
-        page = 1
+        page = args.start_page  # Start from the specified page
         pbar = tqdm(desc="Scraping profiles", unit="profile", ncols=100)
 
         while not interrupted:
-            response = requests.get(base_url.format(page), headers=headers)
-            if response.status_code != 200:
-                logging.error(f"Failed to fetch page {page}. Status code: {response.status_code}")
-                break
-
             try:
+                response = make_request_with_retry(base_url.format(page), headers)
                 data = json.loads(response.text)
                 profiles = data.get('profiles', [])
             except json.JSONDecodeError:
@@ -148,34 +166,32 @@ try:
                     'partnerStatus': 'PLUS' if 'PLUS' in profile.get('tags', []) else ''
                 }
 
-                detail_response = requests.get(detail_url.format(row['handle']), headers=headers)
-                if detail_response.status_code == 200:
-                    try:
-                        detail_data = json.loads(detail_response.text)
-                        partner_data = detail_data.get('profile', {})
-                        
-                        row.update({
-                            'description': partner_data.get('bio', ''),
-                            'services': ', '.join(service.get('service', {}).get('label', '') for service in partner_data.get('serviceOfferings', [])),
-                            'industries': ', '.join(industry.get('label', '') for industry in partner_data.get('industries', [])),
-                            'reviewCount': partner_data.get('numberOfRatings', ''),
-                            'rating': partner_data.get('averageRating', ''),
-                            'websiteUrl': partner_data.get('websiteUrl', ''),
-                            'avatarUrl': partner_data.get('avatarUrl', ''),
-                            'contactEmail': partner_data.get('contactEmail', ''),
-                            'contactPhoneNumber': partner_data.get('contactPhoneNumber', ''),
-                            'city': partner_data.get('city', ''),
-                            'country': partner_data.get('country', {}).get('name', ''),
-                            'secondaryCountries': ', '.join(country.get('name', '') for country in partner_data.get('secondaryCountries', [])),
-                            'partnerSince': partner_data.get('partnerSince', ''),
-                            'socialMediaLinks': ', '.join(f"{link['type']}: {link['url']}" for link in partner_data.get('socialMediaLinks', [])),
-                            'specializedServices': ' | '.join(format_service(service) for service in partner_data.get('specializedServices', [])),
-                            'otherServices': ' | '.join(format_service(service) for service in partner_data.get('otherServices', []))
-                        })
-                    except json.JSONDecodeError:
-                        logging.error(f"Failed to parse JSON for {row['handle']}. Response: {detail_response.text[:500]}...")
-                else:
-                    logging.error(f"Failed to fetch details for {row['handle']}. Status code: {detail_response.status_code}")
+                try:
+                    detail_response = make_request_with_retry(detail_url.format(row['handle']), headers)
+                    detail_data = json.loads(detail_response.text)
+                    partner_data = detail_data.get('profile', {})
+                    
+                    row.update({
+                        'description': partner_data.get('bio', ''),
+                        'services': ', '.join(service.get('service', {}).get('label', '') for service in partner_data.get('serviceOfferings', [])),
+                        'industries': ', '.join(industry.get('label', '') for industry in partner_data.get('industries', [])),
+                        'reviewCount': partner_data.get('numberOfRatings', ''),
+                        'rating': partner_data.get('averageRating', ''),
+                        'websiteUrl': partner_data.get('websiteUrl', ''),
+                        'avatarUrl': partner_data.get('avatarUrl', ''),
+                        'contactEmail': partner_data.get('contactEmail', ''),
+                        'contactPhoneNumber': partner_data.get('contactPhoneNumber', ''),
+                        'city': partner_data.get('city', ''),
+                        'country': partner_data.get('country', {}).get('name', ''),
+                        'secondaryCountries': ', '.join(country.get('name', '') for country in partner_data.get('secondaryCountries', [])),
+                        'partnerSince': partner_data.get('partnerSince', ''),
+                        'socialMediaLinks': ', '.join(f"{link['type']}: {link['url']}" for link in partner_data.get('socialMediaLinks', [])),
+                        'specializedServices': ' | '.join(format_service(service) for service in partner_data.get('specializedServices', [])),
+                        'otherServices': ' | '.join(format_service(service) for service in partner_data.get('otherServices', []))
+                    })
+                except RequestException as e:
+                    logging.error(f"Failed to fetch details for {row['handle']} after multiple retries: {str(e)}")
+                    continue
 
                 writer.writerow(row)
                 csvfile.flush()  # Ensure the data is written to the file
